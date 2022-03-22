@@ -1,0 +1,11 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/879182/4360e3f88eaf45169cda4d610b18b707
+bundleId: https://api.rpubs.com/api/v1/document/879182/4360e3f88eaf45169cda4d610b18b707
+url: http://rpubs.com/nirmal/879182
+when: 1647896691.83338
+lastSyncTime: 1647896691.83338

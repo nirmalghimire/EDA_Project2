@@ -1,0 +1,604 @@
+---
+title: "Facts and Figures about H1B Employees in the US: Exploratory and Trend Analyses"
+author: "Nirmal Ghimire, PhD & Aanishma Regmi Ghimire, Hardworking 1st Grader"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      tidy = 'styler',
+                      comment = NA,
+                      warning = FALSE,
+                      error = FALSE,
+                      message = FALSE,
+                      fig.align = 'center')
+options(digits = 2,
+        scipen = 999)
+```
+
+***Highlights***
+
+This is a research on the trend of H1B employees in the United States. The data comes from the online repository of the Department of Labor. This data doesn't tell anything whether somebody applied or got the H1B visa, nonetheless, it provides information about the critical step before actual H1B application. In addition, it provides insights into the hiring company, job type, prevailing wage, state etc. I am going to dive deep down, I don't really have any agenda here. I am open to exploration and surprises!! I simply want to be able to answer the questions like:
+
+  1. Which state, and city hire the most H1B employees?
+  2. Is there any particular zip code that hires the most?
+  3. What percentage of the total LCA applications are approved, denied, or withdrawn?
+  4. What kind of jobs do the H1B employees fill?
+  5. What is the average wage? And is there any differences on wages based on the job type?
+  6. What is the most recent trend of applying for LCA at the Department of Labor? 
+
+## A. Settingup Basic Stuff Straight
+```{r basic_stuff}
+# Setting up working directory
+setwd("C:/Users/nirma/Documents/GitHub/EDA_Project2")
+# Loading Required Libraries
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(tibble)
+library(janitor)
+library(stargazer)
+```
+
+### A.i. Loading Required Datafiles
+For this project I am going to use the LCA Approval data that I downloaded form the Department of Labor website (`https://www.dol.gov/agencies/eta/foreign-labor/performance`). 
+
+***Short Description of the Datafile***: Any US employer that wants to hire an international employee under the so called "specialty occupations" need to go through a standard procedure. One of such stages is famously called Labor Condition Application (LCA), which is filed by the employer at the Department of Labor(DoL), which is pretty much like a written affidavit that the company would pay and treat fairly to the new international hire. It takes roughly 7-days to get decision on the application, which opens up a door for employers to file Non-immigrant temporary visa called H1B at the United States Citizenship and Immigration Services (USCIS). Currently, I am waiting on my H1B approval, which gave me enough motivation to look into this dataset. 
+
+Please note that it is a raw file and it is the first time I am dealing with this data. Let's upload the data and conduct some exploratory data analyses. 
+
+```{r apa_table_funcation, echo=FALSE}
+library(gt)
+apa_table <- function(x, title = " ") {
+  gt(x) %>%
+  tab_options(
+    table.border.top.color = "white",
+    heading.title.font.size = px(16),
+    column_labels.border.top.width = 3,
+    column_labels.border.top.color = "black",
+    column_labels.border.bottom.width = 3,
+    column_labels.border.bottom.color = "black",
+    table_body.border.bottom.color = "black",
+    table.border.bottom.color = "black",
+    table.width = pct(80),
+    table.background.color = "white"
+  ) %>%
+  cols_align(align="center") %>%
+  tab_style(
+    style = list(
+      cell_borders(
+        sides = c("top", "bottom"),
+        color = "white",
+        weight = px(1)
+      ),
+      cell_text(
+        align="left",
+        size= "small"
+      ),
+      cell_fill(color = "white", alpha = NULL)
+      ),
+    locations = cells_body(
+      columns = everything(),
+      rows = everything()
+    )
+  ) %>%
+    #title setup
+    tab_header(
+    title = html("<i>", title, "</i>")
+  ) %>%
+  opt_align_table_header(align = "left")
+}
+```
+
+### A.ii. Uploading the data and checking the variables
+```{r loading_data_files}
+LCA_Approval <- read_excel("LCA_Approval.xlsx")
+# Checking the dimension of the datatable
+    # nrow(LCA_Approval)
+    # ncol(LCA_Approval)
+dim(LCA_Approval)
+```
+
+OMG!! Our data table has 122,608 data points. There are total of 96 variables, and for sure, I am not going to use them all. Let's check what are those variables: 
+```{r variable_names}
+names(LCA_Approval)
+```
+
+The output lists the names of all variables in the LCA_Approval data table. I am not going to use all of them. Based on these guiding questions, I shortlisted 16 variables. Let's subset the data based on my requirements. The table below provides a brief description of the variables:
+```{r variable_description_table, echo=FALSE}
+options(tibble.width = Inf) # displays all columns.
+variables_of_interest <- tibble(Variable_Names = c("case_number","case_status","lca_application_date","lca_decision_data", "visa_class","soc_title","job_type","job_begin_date","total_worker","employer_name","employer_state","employer_zip","attorney_representation","prevailing_wage","pay_wage_level","H1B_dependent"),
+       Description = c("LCA application case number", "Application outcome/decision", "Application date", "Date of application decision", "Employees' proposed visa type e.g., H1B", "Job category, e.g. computer system analyst", "Fulltime or a parttime job", "First date of work","Total H1B workers in the company","Name of the hiring company","Employer's state","Employer's zip code","If an attorney to filed the case","Proposed wage for the employment","Wage level: ranges between I to IV","Whether the employee need H1B to stay in the US"))
+
+variables_of_interest |>
+  apa_table("Table 1: Variables and Their Brief Description.")
+```
+
+Beside these variables, I may have to create some new variables as I the analyses progresses further. 
+
+### A.iii. Subsetting the data
+As mentioned above, I am going to select only 16 columns from 96 and save the new data in an new object named LCA_final:
+```{r subsetting_data}
+LCA_final <- select(LCA_Approval, CASE_NUMBER, CASE_STATUS, RECEIVED_DATE,DECISION_DATE, VISA_CLASS, SOC_TITLE, FULL_TIME_POSITION, BEGIN_DATE, TOTAL_WORKER_POSITIONS, EMPLOYER_NAME, EMPLOYER_STATE, EMPLOYER_POSTAL_CODE, AGENT_REPRESENTING_EMPLOYER, PREVAILING_WAGE, H1B_DEPENDENT, PW_UNIT_OF_PAY)
+```
+
+It is confusing to have all of the variable names in upper case. Following the R recommendation, I am going to change them in the lower case using the `clean_names()` function from the `janitor` package. 
+```{r clean_names}
+LCA_final <- LCA_final |>
+  clean_names()
+```
+
+I got the clean names. However, some of them are pretty long. I am changing the long names to two_word names. 
+```{r changing_names}
+LCA_final <- LCA_final |>
+  rename(
+    job_title = soc_title,
+    total_worker = total_worker_positions,
+    job_type = full_time_position,
+    attorney_representation = agent_representing_employer,
+    employer_zip = employer_postal_code
+  )
+names(LCA_final)
+```
+
+So far, the data have been uploaded, and required variables are selected. The next task is to look into the data. 
+
+## B. Exploring Data
+Now, I am going to conduct some of the preliminary inquiry of the dataset and check if there's any inconsistencies. In addition, I am going to know my data more by conducting some descriptive analyses and visualizing them. 
+
+### B.i. Summarizing the data
+```{r summary_table}
+summary(LCA_final)
+```
+
+As mentioned above, there are total of 122,608 data points. The data come all the way from 2019 October 1 through 2021 December 31. 
+
+### B.ii. Extracting only 5-digit zip codes
+Looks like there is some problem in the  `employer_zip variable` because it cannot have any string or character value in it. The problem may arise because of some minor differences while entering this data. My guess is some of the zip-codes might have a dash (-) followed by 4-digit numbers after the first 5-digit zip codes. I will go ahead and select only first 6-digits using the `substr() function`, and check what happens. 
+```{r treating_zip_code}
+LCA_final$employer_zip <- substr(LCA_final$employer_zip, 1,5)
+glimpse(LCA_final$employer_zip)
+```
+
+### B.iii. Subsetting the data table
+Based on the above summary, I have traced some problem in the `prevailing_wage` column. The minimum wage is just $7.2 and the highest $810,850 with the mean of 97,169. Looks like some of the wages are in per hour, weekly, bi-weekly or even monthly basis while others in per year basis. I can either change those rates into yearly salary, or get rid of them. Because, I have a huge data set, I am simply going to get rid of the hourly, weekly, and bi-weekly rates using `filter() function`. In addition, I am also going to get rid of the part time employees and consider analyses for the full time employees only. 
+
+```{r filtering_yearly_wage}
+LCA_final <- LCA_final |>
+filter(job_type == "Y" & pw_unit_of_pay == "Year")
+```
+
+After getting the data fixed a little bit, there is no need of the `job_type` and `pw_unit_of_pay` variables. Thus, I am going to get rid of them and save the output with a different name, i.e., `LCA_final_truncated`:
+```{r dropping_variables}
+LCA_final$job_type = NULL
+LCA_final$pw_unit_of_pay = NULL
+summary(LCA_final$prevailing_wage)
+```
+
+The summary of the data set shows that I successfully got rid of the `job_type` & `pw_unit_of_pay` variables. The summary shows that our total data points boiled down to 116,252 from 122,608. We got rid of approximately 5% of the troubling data. 
+
+### B.iv. Focusing on Prevailing Wage Distribution
+The `prevailing_wage` is still troubling because of the wide range between the maximum and minimum wages. Average salary increased to $ 102,014 having the third quartile salary $121,014. I want to check the distribution of this variable using a histogram and will take necessary actions afterward. 
+```{r prevailing_wage_distribution}
+prevailing_wage_distribution <- ggplot(LCA_final, aes(prevailing_wage/1000)) +
+  geom_histogram(fill="red", color="blue", binwidth = 5) +
+  xlab("Prevailing Wages in Thousands of Dollar")+
+  ylab(expression("Cumulative Frequency or Count"))+
+  ggtitle("Prevailing Wage Distribution for H1B Employees During October 2019 - February 2021")
+prevailing_wage_distribution
+```
+
+Wow! What a distribution. Most of the prevailing wages are below $200,000 per year. There are only a few that exceed $250,000 level. Though, really subtle, we can see a small bump in the $400,00 and $600,000 range and probably only one at $850,000 level. Clearly, they have skewed the average prevailing wage. We will probably get rid of these outliers but before that I want to zoom-in and check the 250 to 800 range. 
+```{r zooming_in}
+zoomed_in <- prevailing_wage_distribution + 
+  xlim(c(250,820)) + ylim(c(0,45)) +
+  xlab("Prevailing Wages in Thousands of Dollar Between $250,000 and $850,000")+
+  ylab(expression("Cumulative Frequency or Count"))+
+  ggtitle("Out of Bound Prevailing Wage Distribution")
+zoomed_in
+```
+
+There we go! Looks like there are good number of people between $250,000 to $ 300,000 range, who we cannot exclude from our analyses. However, it looks like there are one person each whose prevailing wage is around $350,000, $400,000, $500,000 & $800,000 per year. They are for sure the outliers and we will be better off getting them out of this study. However, I would like to make sure, I am right in doing so. For this, I will index them out and study. 
+
+#### B.iv.1. Indexing the Prevailing Wage and Doing Further Study of the Outliers
+I am going to check for the total number of employees who were proposed more than $300,000 yearly wages. In addition, I want to see thier job title and some other information.  
+```{r indexing_outliers, echo=FALSE}
+for_outlier <- LCA_final|>
+select(job_title, employer_name, employer_state, prevailing_wage, case_status)
+filter(for_outlier, prevailing_wage>300000)
+```
+
+All of these people come from the health department. Two of the highest prevailing wages were from the same hospital located in North Carolina. Both of these employees were Physicians and Surgeons. Remaining two highest salaries were offered to the employee at Casper Cardiology, WY, and Monument Health Rapid City Hospital in South Dakota. One of the employees was again, a Physician and Surgeons, and while the other was reported to be a Hospitalists. Interestingly, the LCA for the person with the highest Prevailing Wages was first certified and withdrawn, afterward. 
+Based on these information, Physicians and Surgeons seem to be the highest paying jobs for the H1B employees. If you are still trying to decide on your major, go this route!!
+
+#### B.iv.2. Filtering Data Trimming Outliers
+As there are not many outliers, I am going to get rid of these four data points and move forward.
+```{r removing_outliers}
+LCA_final <- LCA_final|>
+  filter(prevailing_wage < 300000)
+glimpse(LCA_final)
+```
+
+I requested the glimpse of my data. There are now, 14 columns and 116,248 rows of data.  
+
+### B.v. Focusing on the Date Variables
+Looking at the classes of the data, most of the `factor varibles` are saved as `character vectors`. Before I change these vectors, I want to check if my date variables are in right format and if I can calculate days between these dates. 
+```{r checking_time_variable}
+data.frame((class(LCA_final$received_date)), (class(LCA_final$decision_date)), (class(LCA_final$begin_date)))
+```
+
+Above table shows that the date variables `received_date`, `decision_date`, & `begin_date` are all in right format. Now, I am checking if I could calculate total number of days between the **application date** and the **decision date**.
+```{r calculating_days}
+# Time Difference in Days
+head(LCA_final$decision_date - LCA_final$received_date)/86400
+```
+
+For some reasons, R calculated the difference in seconds. Thus, divided the outcome by 86,400 (60 X 60 X 24) to change them into days. And it worked. This calculation confirms that these variables are ready to take whatever comes their way. 
+
+### B.vi. Changing the Class of the Varaibles
+Now, I am closing the phase where I can plot some diagrams and conduct analyses. But, before that, I want to change the class of some of the variables to factor. 
+```{r changing_class}
+library(sjlabelled)
+LCA_final$case_status <- as_factor(LCA_final$case_status)
+LCA_final$visa_class <- as_factor(LCA_final$visa_class)
+LCA_final$job_title <- as_factor(LCA_final$job_title)
+LCA_final$employer_name <- as_factor(LCA_final$employer_name)
+LCA_final$employer_state <- as_factor(LCA_final$employer_state)
+LCA_final$employer_zip <- as_factor(LCA_final$employer_zip)
+LCA_final$attorney_representation <- as_factor(LCA_final$attorney_representation)
+LCA_final$h1b_dependent <- as_factor(LCA_final$h1b_dependent)
+
+# Quick check
+class(LCA_final$employer_name)
+```
+
+And that worked!  
+
+### B.vii. Creating New Variables
+Now, I want to create a few more variables before I move to analyze them.
+
+1. **decision_time**: it will be a continuous variable representing the total days the DoL took to provide decision on the LCA application.  
+2. **days_towork**: it will be the difference in days between the date of LCA approval and actual first day of working. And finally,
+3. **wage_thousand**: a continuos variable showing the prevailing wages in thousand. The `prevailing_wage` variable is in regular dollar format which covers really huge range. It is easy to plot the data if our range is smaller. 
+```{r adding_new_variables}
+# First Method
+LCA_final$decision_time <- (LCA_final$decision_date - LCA_final$received_date)/86400
+
+# Second Method
+LCA_final <- LCA_final|>
+  mutate(days_towork = (begin_date - decision_date)/86400,
+         wage_thousand = prevailing_wage/1000)|>
+  mutate_at(vars(15:17),list(~as.numeric(.)))# changing the class of new variables to numeric
+# Quick Checking
+names(LCA_final)
+head(LCA_final$days_towork)
+    #class(LCA_final$days_towork)
+    #class(LCA_final$decision_time)
+    #class(LCA_final$wage_thousand)
+```
+
+The output shows that there are now 17 variables in total including the three that I just created. Further check, confirms that the data the values have been stored in the new columns respectively. 
+
+```{r summary_new_variables}
+rbind(summary(LCA_final$decision_time), summary(LCA_final$days_towork), summary(LCA_final$wage_thousand))
+```
+
+The summary of the `wage_thousand` looks fine. However, I am thrown off guard by the statistics of `decision time` and `days towork` variables, especially, by the numbers in `max` and `min` column. **Maximum reported decision time is 813 days**. Really? I don't know if it were that big of a deal, however, when mean decision time is 23.5 days then 813 days (more than 2-years) seem really unrealistic. It may be possible, though. On the other hand, **the total days gap between the day of LCA approval and the first day of work is 804 days. Surprisingly enough, not after the date of LCA approval, but the person was supposed to work more than 2-years prior to his/her LCA was approved by the Department of Labor**. In addition, LCA approval doesn't mean one can start working. The hiring organization has to apply for H1B on this employee's behalf at USCIS and wait until the application is approved, which takes months based on the information provided on the USCIS website(https://www.uscis.gov/working-in-the-united-states/temporary-workers/h-1b-specialty-occupations-and-fashion-models/h-1b-electronic-registration-process). If the company pays extra fees for premium processing, the H1B decision time boils down to 15 working days, but still, this is something really interesting! IS IT POSSIBLE?
+
+Having said that, I want to make sure I have this information correct. Thus, I am going to look into these issues more closely. 
+
+### B.viii. Focusing on Issues Relating to Decision Time and First Day of Work
+First of all, I am going to check if they represent a single or two different entries. Whet ever they are, I am going to index them first. 
+```{r indexing_record}
+which(LCA_final$days_towork == -804)
+which(LCA_final$decision_time == 813)
+```
+
+Amazingly, they hint to consecutive records, i.e., 112494 & 112495. Let's pull further information about these records:
+```{r checking_further_inforamtion}
+filter(LCA_final, decision_time == 813 | days_towork == -804)
+```
+
+When I parsed them out, I came to realize that they are genuine cases. There is no data entry mistake. I am perplexed to know that it took so long for the DoL to approve their LCA. In both cases, the LCAs were filled in October 2019, which were approved in December 2021, which is fairly recently. One of the person was hired by Franklin Templeton Investment located in California, while the other by InnoCore Solutions in Texas. One of them was dependent on H1B during the time of application while the other wasn't. They somewhat similar job title, Database Administrator and Software Developer. Both of them were from the IT sector.
+
+**Most interesting thing about these records is both of them were supposed to start working within a week from the date of LCA application!!** Looks like it is the common convention. The cases were first certified and withdrawn afterward. I am not sure how to explain it. I used the corresponding LCA reference number and checked for the status on DoL website (https://flag.dol.gov/case-status-search). The status columns shows that they are withdrawn. The reason may be, COVID-19.
+
+They seem to be outliers but let me check the overall staus using a frequency polygon. I want to make a combined plot for `decision_time` and `days_towork`. 
+```{r combined_histogram}
+combined_freqpoly <- ggplot() + geom_freqpoly(data = LCA_final, aes(decision_time, ..density..), color = "darkred") + geom_freqpoly(data = LCA_final, aes(days_towork, ..density..), color = "darkblue") + 
+  xlab("Red: decision_time & Blue: days_towork") +
+  ggtitle("Distribution of decision_time & days_towork among LCA Applicants")
+combined_freqpoly
+```
+
+Looks like the findings are pretty consistent because the distribution looks normal with a huge spike at 0. We can see a couple of small spikes on `days_towork` and that makes a complete sense. If I zoom in between *-25* to *+190* on **x-axis**, I will have clearer picture. Let me do just that:
+```{r combined_histogram_zoomed_in}
+combined_histogram_zoomed_in <- combined_freqpoly +
+  xlim(c(-25,190)) +
+  xlab("Red: decision_time & Blue: days_towork") + 
+  ggtitle("Distribution (between -25 and +190) of decision_time & days_towork among LCA Applicants")
+combined_histogram_zoomed_in
+```
+
+The plot is pretty consistent. Decision time seem to starts earlier than the first day of work. Most of the decision seem to have been received before 20th day of the application. Most of the first day of work also seem to align with the decision time. Some first days of work seem to have set before the decision date, however, I guess it is just the formality. Or maybe the date was picked at the time the forms were filled and there was a gap between the picked date and the date they actually sent the application. Not a big of a deal!! 
+
+We are pretty good, so far. 
+
+## Let's Do Some Real Digging
+Just to remind myself. Below are the questions that I primarily wanted to answer after this research. I guess, I have been able to provide tentative partial answers to the question number 5 and 6. Now, I want to take on these questions in order they appear:
+
+  1. Which state, and city hire the most H1B employees?
+  2. Is there any particular zip code that hires the most?
+  3. What percentage of the total LCA applications are approved, denied, or withdrawn?
+  4. What kind of jobs do the H1B employees fill?
+  5. What is the average wage? And is there any differences on wages based on the job type?
+  6. What is the most recent trend of applying for LCA at the Department of Labor? 
+
+```
+Note:
+My intention of conducting this research is manifold. My first objective is to hone my skills of working in R environment and be able to successfully complete a project. I have done so many times in the past, but I feel like I have to keep practicing things. Second, for some time now, I have taken a lot of courses in R. I learned a lot, but I barely remember most of them. When I sit to work on R, I stumble on every small bumps- the fundamental aspects- and I need to look into my notes or do a google search. The thing is, I overlooked the basic aspects of R and tried to achieve big thing, i.e., being able to use R for advanced statistical research that require rigorous methodological insights like: Hierarchical Linear Modeling (HLM), Structural Equation Modeling (SEM), Longitudinal Modeling, Multivariate Regresssion, and even Machine Learning. Once you are there you realize you lack the basic building blocks. Thus, my intention is to use these basic tools and learn and/or relearn them throug this study. That is the reason, I am over using some of the R features above and will do throughout this paper. Once done, I want to keep this document handy so that I can refer back over and over. 
+
+Finally, my intention is to look into the situation of the H1B applicants and know more about this population. I am recently in the process to be one of them and knowing better would help me keep reasonable expectations. I am using a raw data, I have not read any serious research conducted in this topic and I don't know what to expect. Maybe there are pretty good research that could help me ask better questions, however, I would not like to do so. Thus, everything I come up with will be a pure discovery for me. 
+```
+I will use both visual and computational skills to answer all of these questions. I will try to diversify tools and see how successful I become. 
+
+### Q.N.1. Which state, and city hire the most H1B employees?
+I have to use the `group_by()` function to be able to answer this. I will calculate the total number of employees by states and save the statistics in an object named `employees_by_state`. 
+```{r calculating_employees_by_state}
+employees_by_state <- LCA_final|>
+  na.omit()|>
+  group_by(employer_state) |>
+  count()|>
+  arrange(desc(n))|>
+  mutate(state_percent = (n/116248)*100) |>
+  rename(state = employer_state)
+
+# Plotting state_percent in US Map
+library(usmap)
+plot_usmap(data = employees_by_state, values = "state_percent", color = "red") + scale_fill_continuous(low = "white", high = "red", name = "H1B Percent Estimates", label = scales::comma) + 
+  labs(title = "U.S. States",
+       subtitle = "H1B Employee Distribution Based on LCAs Filed Between 10/2019 & 12/2021.") + 
+  theme(legend.position = "right")
+``` 
+
+I plotted the percent of LCAs filed at the Department of Labor during the aforementioned period per state on the United States Map. Darker red suggest more percentage of filed LCAs, it changes less dark as the percent decreases ultimately changing into solid white. 
+
+Let's check states on the top and bottom of the list:
+```{r top_bottom_states}
+filter(employees_by_state, state_percent < 0.1 | state_percent > 6)
+```
+
+Now, the employees are classified based on the states where they are supposed to work. Looking at the top 6 and bottom 13 states, I can see that there is a huge gap. California tops the list of the states with total of 26,088 (22.4%) LCAs filed at DOL within October 2019 - December 2021, followed by Texas, with 11,244 (9.67%) LCAs. 
+
+For me the discovery is that the foreign employees who want to work in Virgin Island (VI), Guam (GU), and Puerto Rico(PR) on H1B are also in the list. They go through the same process. Good to know!
+
+Finally, there were total of 13 US states and territories that shared less than 0.1% of the LCAs. Virgin Island submitted total of 5 LCAs during the period of 28 months, followed by Alaska with 11 LCAs. 
+
+I want to represent state-wise percentage in a horizontal bar graph. However, the range between the highest and smallest states can be problematic. Thus, I am going to create a row named `other' summing up the values less than 0.5% to represent combined ratio of the small US states and territories. 
+
+**Creating two different objects and binding them together to come up with what I need**
+```{r subsetting_employees_by_state_table}
+# Indexing Big States
+big_states <- employees_by_state |>
+  filter(state_percent >= 0.5)
+    # big_states
+# Indexing Small States
+small_states <- employees_by_state |>
+  filter(state_percent < 0.5)
+# Calculating total n and percent in the small _states
+data.frame(sum(small_states$n), sum(small_states$state_percent))
+```
+
+I created `big_states` and `small_states` tib. There were total of 5025 LCAs filed from these small states and territories and it makes 4.3% of total cases. Now, I am creating a new dataframe `x` with these values and bind it with the `big_states`. 
+```{r rbinding_tables}
+# creating a tibble 'x'
+x <- tibble(state = c("other"),
+                   n = 5025, 
+                   state_percent = 4.3)
+# binding 'x' with 'big_states'
+big_states <- rbind(big_states, x)
+
+# putting the states in order based on 'state_percent'
+big_states <- big_states|>
+  group_by(state)|>
+  arrange(desc(state_percent))
+
+# Checking
+head((big_states),10)
+```
+
+Everything worked. `Other` is in the 7_th position from the top. Now, I am going to plot them in a horizontal bar graph using `ggplot2`. 
+```{r barplot_of_employees_by_states}
+barplot_of_employees_by_states <- big_states |>
+  ggplot(aes(x = reorder(state, state_percent), y = state_percent, fill = state))+
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(state_percent, digits = 2)), color = "black", size = 2.5, hjust = 0, vjust = 0.5) +
+  xlab("States H1B Employees Were Expected to Work") +
+  ylab("Percent (%) of Employees [Total Employees: 116,248]") +
+  ggtitle("New H1B Workers by States Based on LCA Filed Between 10/2019 and 12/2021") +
+  geom_col() +
+  coord_flip() +
+  theme(panel.grid.major = element_blank(),legend.position = "none")
+barplot_of_employees_by_states
+```
+
+The above bar diagram provides a quick insights into the percentage of LCA filed at the DoL within the period of 28 months between 10-2019 and 12-2021. ***California tops the list with 26,088 LCAs filed in the period of 28 months, i.e., approximately 932 LCAs every month or 31 everyday. Indiana is at the bottom of the big states that filed LCAs within the same period***. I know that Indiana is 26 from the top in the `big_state` dataframe. Thus, just to remind myself, I am going to index `Indiana` and see further details. 
+```{r Indiana_Description}
+    # big_states|> print(n=30) #to check the whole data frame
+big_states[26,] #extracts the values in the 26th rows from the big_state tibble
+```
+
+***There were total of 683 LCAs that came from the state of Indiana which roughly made .59%. In other words, approximately 23 LCAs a month or 4 LCAs every five days*** were filed during the period of 28 months. 
+
+### Q.N.2. Is there any particular zip code that hires the most?
+This questions wants me to continue digging the number of proposed H1B employees during the aforementioned period. The easy way is to subset the the `LCA_final` dataframe. 
+```{r by_state_zip}
+# Calculating total employees by zipcode and states
+employees_by_zip_state <- LCA_final|>
+  na.omit()|>
+  group_by(employer_state, employer_zip) |>
+  count() |>
+  arrange(desc(n)) |>
+  mutate(zip_percent = (n/116248)*100)
+    # data.frame(employees_by_zip_state)
+
+# Subsetting the above data by count
+employees_by_zip_percent <- employees_by_zip_state|>
+  group_by(n, zip_percent) |>
+  count()|>
+  rename(total_LCAs = n,
+         total_zip = nn)|>
+  arrange(desc(zip_percent))
+    # data.frame(employees_by_zip_percent)
+summary(employees_by_zip_percent)
+```
+
+Further digging of the data by Zip code shows that there were 1664 Zip codes that filed just 1 LCA, 673 with 2, 391 with 3, 248 with 4, 165 with 5, 138 with 6, and 102 with 7 LCAs within the aforementioned period. The output table is not shown here because of it takes a lot of space (239 rows of data). There were total of 38 zip codes which filed more than 500 LCAs each in this period, with a maximum of 5057 LCAs (i.e., 4.4%) within a single zip. 
+
+If you are thinking of applying for a job that has potential to sponsor H1B, here is the list of 38 top most state and zip you want to focus:
+```{r top_most_zip}
+hot_zip <- employees_by_zip_state |>
+  filter(zip_percent > 0.41033)
+    #data.frame(hot_zip)
+barplot_of_employees_by_zipcode <- hot_zip |>
+  ggplot(aes(x = reorder(employer_zip, zip_percent), 
+             y = zip_percent, fill = employer_state)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(zip_percent, digits = 2)), color = "purple", size = 2.5, hjust = 0, vjust = 0.5) +
+  xlab("Zipcodes Where H1B Employees Were Expected to Work") +
+  ylab("Percent (%) of Employees [Total Employees: 116,248]") +
+  ggtitle("Top 38 Zipcodes Based on LCA Filed Between 10/2019 and 12/2021") +
+  geom_col() +
+  coord_flip() +
+  theme(panel.grid.major = element_blank(), legend.position = "none")
+
+barplot_of_employees_by_zipcode
+```
+
+The bar diagram shows the percentage of LCA filed at the DoL. Zip code 98121 applied for approximately 4.35% of LCA during the study period. This zip code is in the state of Washington and it covers King County, where Amazon Head Quarter is located. Similarly, another 1.92% percent LCAs were filed from the zip code 98052, which also lies in the same county. ***Although, California is the most H1B friendly state, 98121 is the most popular zip codes in terms of number of filed LCAs.*** 
+
+*Note*: The plot shows the real zip codes, so, feel free to check them for further details. 
+
+That being said, I want to make sure I have them correct. Let's check the data stored in the column `employer_name` and match them with the above zip codes and find out ten most popular companies. 
+```{r checking_employer_name}
+head((LCA_final$employer_name),3)
+```
+
+#### Top 10 Companies in terms of Total LCAs Filed During 10/2019 and 12/2021
+The output shows that the input is messy. Some names are in all upper case and some in title case format. If proceed without changing them, we may end up having the same company repeat multiple times. Thus, I would like to change all of the company names into `title case` using `str_to_title()` from `stringr` package. 
+```{r to_title_case}
+library(stringr)
+LCA_final$employer_name <- str_to_title(LCA_final$employer_name)
+    #head(LCA_final$employer_name)
+# Indexing the Top 10 Zip Codes and the Company Located within them. Option 1:
+    #index_1 <- match(c("98121","77845","94043","98052","20850","60173","07094","95054","94025","19103"), LCA_final$employer_zip)
+    #top_employer <- LCA_final$employer_name[index_1]
+# Option 2:
+trunc_top_employer <- LCA_final |>
+  na.omit()|>
+  group_by(employer_name,employer_state, employer_zip)|>
+  count()|>
+  arrange(desc(n))
+trunc_top_employer_10 <- head((trunc_top_employer),10)
+trunc_top_employer_10$employer_name <- strtrim(trunc_top_employer_10$employer_name, 9) #Trims the long names to 10 characters
+
+# Plotting a Bar Diagram
+diffcolor<-c("red","grey","pink","orange", "green") 
+barplot(height = trunc_top_employer_10$n, names.arg = trunc_top_employer_10$employer_name, 
+        xlab = "",
+        las=2,
+        ylab = expression('Total LCAs in 28 Months'), 
+        ylim = c(1000,3500), 
+        main = expression('Top Ten Companies that Filed the Most LCAs Between 10/2019-12/2021'), 
+        col = diffcolor)
+```
+
+### Q.N.3. What percentage of the total LCA applications are approved, denied, or withdrawn?
+This question should be fairly easy to answer. Let's check the variable and how its values are stored. 
+```{r checking_case_status_variable}
+str(LCA_final$case_status)
+```
+
+As seen above, it had four possibilities, i.e., Certified, Certified-Withdrawn, Denied, Withdrawn. Now, I am going to plot a pie chart and check what was the status:
+```{r pie_chart_case_status}
+decision_distribution <- LCA_final|>
+  na.omit()|>
+  group_by(case_status)|>
+  count()|>
+  mutate(decision_percent = (n/116248)*100)
+  decision_distribution
+
+library(plotrix)
+pie3D(decision_distribution$n, mar = rep(1.75,4), 
+      theta = 1.5,
+      col = hcl.colors(length(decision_distribution$n), "Spectral"),
+      border = "white", 
+      labels = decision_distribution$case_status,
+      main = "Distribution of Decision on LCAs Filed between 10/2019-12/2021", explode = 0.1, labelcex = 0.8, start = 0.7)
+```
+
+Finally, let's check if there the decisions have anything to do with the companies. 
+```{r decision_rate_by_company}
+decision_rate_by_company <- LCA_final|>
+  na.omit()|>
+  group_by(employer_name, case_status)|>
+  count()|>
+  arrange(desc(n))
+head((decision_rate_by_company),15)
+```
+
+As expected, most of the LCAs filed during the period were certified and most of the big companies retained the rate. However, the only thing that stood out was **Tekorg Inc.**, which had total of **1591** cases certified and then withdrawn!! I would like to see how many LCAs did this company filed and what's the status: 
+```{r Tekorag_inquiry}
+Tekorg <- LCA_final|>
+  na.omit()|>
+  select(employer_name, employer_zip, case_status)|>
+  filter(employer_name == "Tekorg Inc." & employer_zip == "60173")|>
+  group_by(case_status)|>
+  count()|>
+  mutate(decision_percent = (n/2021)*100)
+Tekorg
+```
+
+Amazing! In last 28 months, this company filled slightly higher than 2000 LCAs for full time employees at the Department of Labor. It looks like none of the applications were denied, 46 were withdrawn before receiving decision. Approximately, 19% of the applications were certified and probably they are still active. The most striking finding is approximately 79% filings were first certified and then withdrawn. **What is the reason?** One possible reason can be COVID-19, or these LCAs did not make through the lottery process, or their H1B applications got rejected. There's 65000 cap every year. Pretty unfortunate!
+
+### Q.N.4. What kind of jobs do the H1B employees fill?
+First of all, I want to check if the values in the `job_title` are in same format. If not, I have to find a way to do so. Let's change them into the `title case` and then check them:
+```{r checking_job_title}
+#Changing
+LCA_final$job_title <- factor(str_to_title(LCA_final$job_title))
+# Checking
+  #head((LCA_final$job_title),10)
+str(LCA_final$job_title)
+```
+
+The answer is, these people fill all kind of jobs in the United States. More precisely, they were supposed to fill 490 different types of jobs as mentioned in the LCAs filed at the Department of Labor. 
+
+Now, `job_title` is a factor variable with 490 types of jobs. I would like to see group them by `job_title` and do further analyses. 
+```{r job_distribution}
+job_distribution <- LCA_final|>
+  na.omit()|>
+  group_by(job_title) |>
+  count()|>
+  mutate(job_percent = (n/116248)*100)|>
+  arrange(desc(job_percent))
+#print(job_distribution, n=25)
+t_20_jobs <- head((job_distribution),20)
+
+## Lollipop Plot
+ggplot(t_20_jobs, aes(x=reorder(job_title, n), y=n)) +
+  geom_segment(aes(x=job_title, xend=job_title, y=0, yend=n), color="lightblue") +
+  geom_point(size=3, color="blue", fill="orange", alpha=0.5, shape=21, stroke=2) +
+  xlab("Most Popular H1B Jobs") +
+  ylab("Number of LCAs Filed 10/2019-12/2021") +
+  ggtitle("Distribution of Top 20 H1B Jobs") +
+  theme_light() +
+  coord_flip() 
+```
+
+The outcome shows that most of the top 20 jobs based on LCA filed during 10/2019-12/2021 were IT related. The "Software Developers,Applications" was by far the most popular `job_title`. Roughly 38,000 LCAs were filed for the same title. Likewise, "Software Developers, System Software" was the second popular with approximately 10,000 LCAs within 28 month period. Computer System Analyst was top 3^rd^ with approximately 7,000 LCAs. 
+
+### Q.N.5. What is the average wage? And is there any differences on wages based on the job type?
+
+  
+### Q.N.6. What is the most recent trend of applying for LCA at the Department of Labor?
